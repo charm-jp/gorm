@@ -45,6 +45,11 @@ func (scope *Scope) DB() *DB {
 	return scope.db
 }
 
+// CacheStore returns scope's cache store
+func (scope *Scope) CacheStore() *cache {
+	return scope.db.parent.cache
+}
+
 // NewDB create a new DB without search information
 func (scope *Scope) NewDB() *DB {
 	if scope.db != nil {
@@ -323,8 +328,24 @@ type tabler interface {
 	TableName() string
 }
 
+type cacher interface {
+	Cache() *int64
+}
+
 type dbTabler interface {
 	TableName(*DB) string
+}
+
+func (scope *Scope) Cache() *int64 {
+	if scope.CacheStore() != nil && scope.CacheStore().enabled {
+		if cache, ok := scope.Value.(cacher); ok {
+			return cache.Cache()
+		}
+
+		return scope.GetModelStruct().Cache(scope.db.Model(scope.Value))
+	}
+
+	return nil
 }
 
 // TableName return table name
