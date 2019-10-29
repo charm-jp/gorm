@@ -149,6 +149,7 @@ func (c *cache) StoreItem(key string, data interface{}, errors error) {
 		affectedIDs = []string{getID(data)}
 	}
 
+	c.idMapMutex.Lock()
 	if _, ok := c.database[key]; !ok {
 		c.mutex.Lock()
 		c.database[key] = &cacheItem{
@@ -169,7 +170,6 @@ func (c *cache) StoreItem(key string, data interface{}, errors error) {
 	}
 
 	// Store the query selector agains the relevent IDs
-	c.idMapMutex.Lock()
 	if _, ok := c.idMapping[model]; !ok {
 		c.idMapping[model] = make(map[string][]string, 100)
 	}
@@ -193,6 +193,8 @@ type modelId struct {
 
 func (c *cache) Expireitem(model, id string) {
 	c.idMapMutex.Lock()
+	c.mutex.Lock()
+
 	var items []modelId
 
 	if id != "" {
@@ -206,17 +208,16 @@ func (c *cache) Expireitem(model, id string) {
 		delete(c.idMapping, model)
 	}
 
-	c.idMapMutex.Unlock()
-
 	// Delete the items from the cache
-	c.mutex.Lock()
 	for _, modelID := range items {
 		for _, ref := range modelID.refs {
 			fmt.Println("Expiring item " + ref + "(based on " + modelID.model + "/" + modelID.id)
 			delete(c.database, ref)
 		}
 	}
+
 	c.mutex.Unlock()
+	c.idMapMutex.Unlock()
 }
 
 func getID(data interface{}) string {
