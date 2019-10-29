@@ -140,8 +140,12 @@ func (c *cache) StoreItem(key string, data interface{}, errors error) {
 		s := reflect.ValueOf(data)
 		model = reflect.TypeOf(data).Elem().String()
 
-		for i := 0; i < s.Len(); i++ {
-			affectedIDs = append(affectedIDs, getID(s.Index(i).Interface()))
+		if s.Len() == 0 {
+			affectedIDs = append(affectedIDs, "")
+		} else {
+			for i := 0; i < s.Len(); i++ {
+				affectedIDs = append(affectedIDs, getID(s.Index(i).Interface()))
+			}
 		}
 
 	case reflect.Struct:
@@ -150,6 +154,8 @@ func (c *cache) StoreItem(key string, data interface{}, errors error) {
 	}
 
 	c.idMapMutex.Lock()
+	defer c.idMapMutex.Unlock()
+
 	if _, ok := c.database[key]; !ok {
 		c.mutex.Lock()
 		c.database[key] = &cacheItem{
@@ -175,6 +181,7 @@ func (c *cache) StoreItem(key string, data interface{}, errors error) {
 	}
 
 	for _, id := range affectedIDs {
+		fmt.Println("Adding to IDs list: " + model + "/" + id)
 		if _, ok := c.idMapping[model][id]; !ok {
 			// We need to create the array
 			c.idMapping[model][id] = []string{key}
@@ -182,7 +189,6 @@ func (c *cache) StoreItem(key string, data interface{}, errors error) {
 			c.idMapping[model][id] = append(c.idMapping[model][id], key)
 		}
 	}
-	c.idMapMutex.Unlock()
 }
 
 type modelId struct {
@@ -194,6 +200,8 @@ type modelId struct {
 func (c *cache) Expireitem(model, id string) {
 	c.idMapMutex.Lock()
 	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	defer c.idMapMutex.Unlock()
 
 	var items []modelId
 
@@ -216,8 +224,6 @@ func (c *cache) Expireitem(model, id string) {
 		}
 	}
 
-	c.mutex.Unlock()
-	c.idMapMutex.Unlock()
 }
 
 func getID(data interface{}) string {
