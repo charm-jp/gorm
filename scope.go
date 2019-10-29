@@ -230,7 +230,7 @@ func (scope *Scope) SetColumn(column interface{}, value interface{}) error {
 				updateAttrs[field.DBName] = value
 				return field.Set(value)
 			}
-			if (field.DBName == dbName) || (field.Name == name && mostMatchedField == nil) {
+			if !field.IsIgnored && ((field.DBName == dbName) || (field.Name == name && mostMatchedField == nil)) {
 				mostMatchedField = field
 			}
 		}
@@ -262,7 +262,7 @@ func (scope *Scope) CallMethod(methodName string) {
 func (scope *Scope) AddToVars(value interface{}) string {
 	_, skipBindVar := scope.InstanceGet("skip_bindvar")
 
-	if expr, ok := value.(*expr); ok {
+	if expr, ok := value.(*SqlExpr); ok {
 		exp := expr.expr
 		for _, arg := range expr.args {
 			if skipBindVar {
@@ -280,23 +280,6 @@ func (scope *Scope) AddToVars(value interface{}) string {
 		return "?"
 	}
 	return scope.Dialect().BindVar(len(scope.SQLVars))
-}
-
-// IsCompleteParentheses check if the string has complete parentheses to prevent SQL injection
-func (scope *Scope) IsCompleteParentheses(value string) bool {
-	count := 0
-	for i, _ := range value {
-		if value[i] == 40 { // (
-			count++
-		} else if value[i] == 41 { // )
-			count--
-		}
-		if count < 0 {
-			break
-		}
-		i++
-	}
-	return count == 0
 }
 
 // SelectAttrs return selected attributes
@@ -605,10 +588,6 @@ func (scope *Scope) buildCondition(clause map[string]interface{}, include bool) 
 		}
 
 		if value != "" {
-			if !scope.IsCompleteParentheses(value) {
-				scope.Err(fmt.Errorf("incomplete parentheses found: %v", value))
-				return
-			}
 			if !include {
 				if comparisonRegexp.MatchString(value) {
 					str = fmt.Sprintf("NOT (%v)", value)
@@ -838,7 +817,7 @@ func (scope *Scope) orderSQL() string {
 	for _, order := range scope.Search.orders {
 		if str, ok := order.(string); ok {
 			orders = append(orders, scope.quoteIfPossible(str))
-		} else if expr, ok := order.(*expr); ok {
+		} else if expr, ok := order.(*SqlExpr); ok {
 			exp := expr.expr
 			for _, arg := range expr.args {
 				exp = strings.Replace(exp, "?", scope.AddToVars(arg), 1)
@@ -983,7 +962,7 @@ func (scope *Scope) updatedAttrsWithValues(value interface{}) (results map[strin
 
 	for key, value := range convertInterfaceToMap(value, true, scope.db) {
 		if field, ok := scope.FieldByName(key); ok && scope.changeableField(field) {
-			if _, ok := value.(*expr); ok {
+			if _, ok := value.(*SqlExpr); ok {
 				hasUpdate = true
 				results[field.DBName] = value
 			} else {

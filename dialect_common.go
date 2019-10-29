@@ -161,6 +161,10 @@ func (commonDialect) SelectFromDummyTable() string {
 	return ""
 }
 
+func (commonDialect) LastInsertIDOutputInterstitial(tableName, columnName string, columns []string) string {
+	return ""
+}
+
 func (commonDialect) LastInsertIDReturningSuffix(tableName, columnName string) string {
 	return ""
 }
