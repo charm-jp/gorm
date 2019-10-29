@@ -336,7 +336,7 @@ func (scope *Scope) TableName() string {
 	if scope.Search != nil && scope.Search.tableName != nil {
 		if str, ok := scope.Search.tableName.(string); ok {
 			return str
-		} else if exp, ok := scope.Search.tableName.(*expr); ok {
+		} else if exp, ok := scope.Search.tableName.(*SqlExpr); ok {
 			return exp.expr
 		}
 	}
@@ -358,7 +358,7 @@ func (scope *Scope) QuotedTableName() (name string) {
 		var tableName string
 		if str, ok := scope.Search.tableName.(string); ok {
 			tableName = str
-		} else if exp, ok := scope.Search.tableName.(*expr); ok {
+		} else if exp, ok := scope.Search.tableName.(*SqlExpr); ok {
 			tableName = exp.expr
 		}
 
@@ -873,7 +873,7 @@ func (scope *Scope) joinsSQL() string {
 func (scope *Scope) tableSQL() string {
 	if str, ok := scope.Search.tableName.(string); ok {
 		return str
-	} else if expr, ok := scope.Search.tableName.(*expr); ok {
+	} else if expr, ok := scope.Search.tableName.(*SqlExpr); ok {
 		exp := expr.expr
 		for _, arg := range expr.args {
 			exp = strings.Replace(exp, "?", scope.AddToVars(arg), 1)
