@@ -139,7 +139,7 @@ func (s *search) unscoped() *search {
 //}
 
 func (s *search) ParameterisedTable(query string, values ...interface{}) *search {
-	s.tableName = &expr{
+	s.tableName = &SqlExpr{
 		expr: query,
 		args: values,
 	}
