@@ -241,7 +241,7 @@ func getID(data interface{}) string {
 	for i := 0; i < intType.NumField(); i++ {
 		tag := intType.Field(i).Tag
 		if strings.Contains(tag.Get("gorm"), "primary_key") {
-			idParts = append(idParts, d.Field(i).String())
+			idParts = append(idParts, fmt.Sprint(d.Field(i).Interface()))
 		}
 	}
 
