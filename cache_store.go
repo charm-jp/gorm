@@ -70,7 +70,7 @@ type KeyValue struct {
 	Value *cacheItem
 }
 
-func (c cache) Empty() {
+func (c *cache) Empty() {
 	if len(c.database) > c.size {
 		fmt.Println("Over the limit. Running cleanup")
 
@@ -99,7 +99,7 @@ func (c cache) Empty() {
 	}
 }
 
-func (c cache) GetItem(key string, offset int64) (interface{}, error) {
+func (c *cache) GetItem(key string, offset int64) (interface{}, error) {
 	fmt.Print("Getting item " + key + " ... ")
 
 	c.mutex.RLock()
@@ -156,24 +156,22 @@ func (c *cache) StoreItem(key string, data interface{}, errors error) {
 	c.idMapMutex.Lock()
 	defer c.idMapMutex.Unlock()
 
+	c.mutex.Lock()
 	if _, ok := c.database[key]; !ok {
-		c.mutex.Lock()
 		c.database[key] = &cacheItem{
 			created:     time.Now().UnixNano(),
 			accessCount: 1,
 			data:        data,
 			err:         errors,
 		}
-		c.mutex.Unlock()
 	} else {
-		c.mutex.RLock()
 		c.database[key].dataMutex.Lock()
 		c.database[key].data = data
 		c.database[key].err = errors
 		c.database[key].created = time.Now().UnixNano()
 		c.database[key].dataMutex.Unlock()
-		c.mutex.RUnlock()
 	}
+	c.mutex.Unlock()
 
 	// Store the query selector agains the relevent IDs
 	if _, ok := c.idMapping[model]; !ok {
