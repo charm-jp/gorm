@@ -44,7 +44,9 @@ type Dialect interface {
 	SelectFromDummyTable() string
 	// LastInsertIDOutputInterstitial most dbs support LastInsertId, but mssql needs to use `OUTPUT`
 	LastInsertIDOutputInterstitial(tableName, columnName string, columns []string) string
-	// LastInsertIdReturningSuffix most dbs support LastInsertId, but postgres needs to use `RETURNING`
+	// LastInsertIdReturningPrefix most dbs support LastInsertId, but MSSQL 2005 needs to create a table variable
+	LastInsertIDReturningPrefix(tableName, columnName string) string
+	// LastInsertIdReturningSuffix most dbs support LastInsertId, but postgres needs to use `RETURNING` and MSSQL 2005 needs to clean up table var.
 	LastInsertIDReturningSuffix(tableName, columnName string) string
 	// DefaultValueStr
 	DefaultValueStr() string

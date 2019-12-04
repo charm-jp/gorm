@@ -100,12 +100,14 @@ func createCallback(scope *Scope) {
 			returningColumn = scope.Quote(primaryField.DBName)
 		}
 
+		lastInsertIDReturningPrefix := scope.Dialect().LastInsertIDReturningPrefix(quotedTableName, returningColumn)
 		lastInsertIDReturningSuffix := scope.Dialect().LastInsertIDReturningSuffix(quotedTableName, returningColumn)
 		lastInsertIDOutputInterstitial := scope.Dialect().LastInsertIDOutputInterstitial(quotedTableName, returningColumn, columns)
 
 		if len(columns) == 0 {
 			scope.Raw(fmt.Sprintf(
-				"INSERT%v INTO %v %v%v%v",
+				"%v INSERT %v INTO %v %v%v%v",
+				addExtraSpaceIfExist(lastInsertIDReturningPrefix),
 				addExtraSpaceIfExist(insertModifier),
 				quotedTableName,
 				scope.Dialect().DefaultValueStr(),
@@ -114,7 +116,8 @@ func createCallback(scope *Scope) {
 			))
 		} else {
 			scope.Raw(fmt.Sprintf(
-				"INSERT%v INTO %v (%v)%v VALUES (%v)%v%v",
+				"%v INSERT %v INTO %v (%v)%v VALUES (%v)%v%v",
+				addExtraSpaceIfExist(lastInsertIDReturningPrefix),
 				addExtraSpaceIfExist(insertModifier),
 				scope.QuotedTableName(),
 				strings.Join(columns, ","),

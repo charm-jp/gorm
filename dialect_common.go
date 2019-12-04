@@ -165,6 +165,10 @@ func (commonDialect) LastInsertIDOutputInterstitial(tableName, columnName string
 	return ""
 }
 
+func (commonDialect) LastInsertIDReturningPrefix(tableName, columnName string) string {
+	return ""
+}
+
 func (commonDialect) LastInsertIDReturningSuffix(tableName, columnName string) string {
 	return ""
 }
