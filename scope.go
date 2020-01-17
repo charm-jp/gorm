@@ -15,6 +15,9 @@ import (
 // Scope contain current operation's information when you perform any operation on the database
 type Scope struct {
 	Search          *search
+	CacheResult     string
+	Host            string
+	HostType        string
 	Value           interface{}
 	SQL             string
 	SQLVars         []interface{}
@@ -59,6 +62,21 @@ func (scope *Scope) NewDB() *DB {
 		return db
 	}
 	return nil
+}
+
+func (s *Scope) Copy() *Scope {
+	return &Scope{
+		Search:          s.Search,
+		Value:           s.Value,
+		SQL:             s.SQL,
+		SQLVars:         s.SQLVars,
+		db:              s.db,
+		instanceID:      s.instanceID,
+		primaryKeyField: s.primaryKeyField,
+		skipLeft:        s.skipLeft,
+		fields:          s.fields,
+		selectAttrs:     s.selectAttrs,
+	}
 }
 
 // SQLDB return *sql.DB
@@ -433,8 +451,12 @@ func (scope *Scope) InstanceGet(name string) (interface{}, bool) {
 
 // Begin start a transaction
 func (scope *Scope) Begin() *Scope {
-	if db, ok := scope.SQLDB().(sqlDb); ok {
-		if tx, err := db.Begin(); scope.Err(err) == nil {
+	if db, ok := scope.SQLDB().(*ConnectionManager); ok {
+		if tx, host, err := db.BeginHost(); scope.Err(err) == nil {
+			scope.Host = host
+			scope.CacheResult = "not"
+			scope.HostType = db.serverType
+
 			scope.db.db = interface{}(tx).(SQLCommon)
 			scope.InstanceSet("gorm:started_transaction", true)
 		}
@@ -905,6 +927,8 @@ func (scope *Scope) inlineCondition(values ...interface{}) *Scope {
 }
 
 func (scope *Scope) callCallbacks(funcs []*func(s *Scope)) *Scope {
+	originalScope := scope.Copy()
+
 	defer func() {
 		if err := recover(); err != nil {
 			if db, ok := scope.db.db.(sqlTx); ok {
@@ -919,7 +943,16 @@ func (scope *Scope) callCallbacks(funcs []*func(s *Scope)) *Scope {
 			break
 		}
 	}
-	return scope
+
+	// If there are certain failures, attempt to run the chain again
+	if scope.db.db.(*ConnectionManager).ShouldRetry(scope.db.Error) {
+		fmt.Println("Clearing error and retrying request...")
+		scope.db.Error = nil
+		return originalScope.callCallbacks(funcs)
+	} else {
+		//fmt.Println("Callbacks completed")
+		return scope
+	}
 }
 
 func convertInterfaceToMap(values interface{}, withIgnoredField bool, db *DB) map[string]interface{} {
@@ -1092,7 +1125,7 @@ func (scope *Scope) typeName() string {
 // trace print sql log
 func (scope *Scope) trace(t time.Time) {
 	if len(scope.SQL) > 0 {
-		scope.db.slog(scope.SQL, t, scope.SQLVars...)
+		scope.db.slog(scope.SQL, t, scope.CacheResult, scope.Host, scope.HostType, scope.SQLVars...)
 	}
 }
 

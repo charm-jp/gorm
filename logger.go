@@ -96,8 +96,21 @@ var LogFormatter = func(values ...interface{}) (messages []interface{}) {
 				}
 			}
 
+			cacheMessage := ""
+			switch values[6] {
+			case "hit":
+				cacheMessage = "\033[1;32mHIT\033[0m"
+			case "miss":
+				cacheMessage = "\033[1;31mMISS\033[0m"
+			case "refresh":
+				cacheMessage = "\033[1;34mREFRESH\033[0m"
+			case "not":
+				cacheMessage = "\033[1;35mNOT\033[0m"
+			}
+
 			messages = append(messages, sql)
-			messages = append(messages, fmt.Sprintf(" \n\033[36;31m[%v]\033[0m ", strconv.FormatInt(values[5].(int64), 10)+" rows affected or returned "))
+			messages = append(messages, fmt.Sprintf(" \n\033[36;31m[%v - %s - %s:/%s]\033[0m ", strconv.FormatInt(values[5].(int64), 10)+" rows affected or returned", cacheMessage, values[8], values[7]))
+
 		} else {
 			messages = append(messages, "\033[31;1m")
 			messages = append(messages, values[2:]...)

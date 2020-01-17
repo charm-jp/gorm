@@ -100,7 +100,7 @@ func (c *cache) Empty() {
 }
 
 func (c *cache) GetItem(key string, offset int64) (interface{}, error) {
-	fmt.Print("Getting item " + key + " ... ")
+	//fmt.Print("Getting item " + key + " ... ")
 
 	c.mutex.RLock()
 	if item, ok := c.database[key]; ok {
@@ -112,14 +112,14 @@ func (c *cache) GetItem(key string, offset int64) (interface{}, error) {
 		defer item.dataMutex.RUnlock()
 
 		if (item.created+(offset*1000000000) > time.Now().UnixNano()) || offset == -1 {
-			fmt.Print("Found \n")
+			//fmt.Print("Found \n")
 			c.mutex.RUnlock()
 			return item.data, item.err
 		}
 
-		fmt.Print("Expired \n")
+		//fmt.Print("Expired \n")
 	} else {
-		fmt.Print("Not found \n")
+		//fmt.Print("Not found \n")
 	}
 
 	c.mutex.RUnlock()
@@ -127,7 +127,7 @@ func (c *cache) GetItem(key string, offset int64) (interface{}, error) {
 }
 
 func (c *cache) StoreItem(key string, data interface{}, errors error) {
-	fmt.Println("Storing item " + key)
+	//fmt.Println("Storing item " + key)
 
 	// Affected IDs
 	affectedIDs := make([]string, 0, 100)
@@ -179,7 +179,7 @@ func (c *cache) StoreItem(key string, data interface{}, errors error) {
 	}
 
 	for _, id := range affectedIDs {
-		fmt.Println("Adding to IDs list: " + model + "/" + id)
+		//fmt.Println("Adding to IDs list: " + model + "/" + id)
 		if _, ok := c.idMapping[model][id]; !ok {
 			// We need to create the array
 			c.idMapping[model][id] = []string{key}
@@ -217,7 +217,7 @@ func (c *cache) Expireitem(model, id string) {
 	// Delete the items from the cache
 	for _, modelID := range items {
 		for _, ref := range modelID.refs {
-			fmt.Println("Expiring item " + ref + "(based on " + modelID.model + "/" + modelID.id)
+			//fmt.Println("Expiring item " + ref + "(based on " + modelID.model + "/" + modelID.id)
 			delete(c.database, ref)
 		}
 	}

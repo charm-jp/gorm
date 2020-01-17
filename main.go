@@ -74,7 +74,7 @@ func Open(dialect string, args ...interface{}) (db *DB, err error) {
 			driver = value
 			source = args[1].(string)
 		}
-		dbSQL, err = sql.Open(driver, source)
+		dbSQL, err = ConnectionOpen(driver, source)
 		ownDbSQL = true
 	case SQLCommon:
 		dbSQL = value
@@ -94,7 +94,7 @@ func Open(dialect string, args ...interface{}) (db *DB, err error) {
 		return
 	}
 	// Send a ping to make sure the database connection is alive.
-	if d, ok := dbSQL.(*sql.DB); ok {
+	if d, ok := dbSQL.(*ConnectionManager); ok {
 		if err = d.Ping(); err != nil && ownDbSQL {
 			d.Close()
 		}
@@ -124,8 +124,8 @@ func (s *DB) Close() error {
 
 // DB get `*sql.DB` from current connection
 // If the underlying database connection is not a *sql.DB, returns nil
-func (s *DB) DB() *sql.DB {
-	db, _ := s.db.(*sql.DB)
+func (s *DB) DB() *ConnectionManager {
+	db, _ := s.db.(*ConnectionManager)
 	return db
 }
 
@@ -878,8 +878,9 @@ func (s *DB) log(v ...interface{}) {
 	}
 }
 
-func (s *DB) slog(sql string, t time.Time, vars ...interface{}) {
+func (s *DB) slog(sql string, t time.Time, cache string, host string, hostType string, vars ...interface{}) {
 	if s.logMode == detailedLogMode {
-		s.print("sql", fileWithLineNum(), NowFunc().Sub(t), sql, vars, s.RowsAffected)
+		//host, driver := getHostAndDriver(*s)
+		s.print("sql", fileWithLineNum(), NowFunc().Sub(t), sql, vars, s.RowsAffected, cache, host, hostType)
 	}
 }

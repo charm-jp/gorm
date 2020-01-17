@@ -72,6 +72,8 @@ func queryCallback(scope *Scope) {
 
 		key := fmt.Sprint(scope.SQL, scope.SQLVars)
 
+		host := "unknown"
+		cacheType := "not"
 		if cacheOperation != nil {
 			// If the time is > 0, simply provide the cached results
 			if *cacheOperation > 0 || *cacheOperation == -1 {
@@ -87,24 +89,23 @@ func queryCallback(scope *Scope) {
 						scope.db.RowsAffected = int64(reflect.ValueOf(cacheResults).Len())
 					}
 
-					fmt.Println("Cache HIT")
+					cacheType = "hit"
+					host = "memory-cache"
 					readFromDB = false
 				} else {
 					readFromDB = true
-					fmt.Println("Cache MISS")
+					cacheType = "miss"
 					writeToCache = true
 				}
 			} else {
-				fmt.Println("Cache REFRESH")
+				cacheType = "refresh"
 				readFromDB = true
 				writeToCache = true
 			}
-		} else {
-			fmt.Println("Cache NOT")
 		}
 
 		if readFromDB {
-			if rows, err := scope.SQLDB().Query(scope.SQL, scope.SQLVars...); scope.Err(err) == nil {
+			if rows, h, err := scope.SQLDB().(*ConnectionManager).QueryHost(scope.SQL, scope.SQLVars...); scope.Err(err) == nil {
 				defer rows.Close()
 
 				columns, _ := rows.Columns()
@@ -133,13 +134,18 @@ func queryCallback(scope *Scope) {
 					scope.Err(ErrRecordNotFound)
 				}
 
-				// If we're allowed, write the results to the cache
+				host = h
 			}
 		}
 
+		// If we're allowed, write the results to the cache
 		if writeToCache {
 			scope.CacheStore().StoreItem(key, results.Interface(), scope.db.Error)
 		}
+
+		scope.HostType = scope.SQLDB().(*ConnectionManager).serverType
+		scope.Host = host
+		scope.CacheResult = cacheType
 	}
 }
 
