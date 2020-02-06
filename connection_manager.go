@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"go.uber.org/atomic"
 	"reflect"
 	"regexp"
 	"strings"
@@ -17,19 +18,34 @@ var mssqlHostRegex = regexp.MustCompile("@(.*)\\?")
 var NoMaster = errors.New("no master host available")
 var NoHost = errors.New("no host available")
 
+type ConnectionMessage int
+
+const (
+	Connect ConnectionMessage = iota + 1
+	Ping
+	BadConnection
+)
+
+type ConnectInstruction struct {
+	Message ConnectionMessage
+	Data    interface{}
+}
+
 type DatabaseConnection struct {
 	connection *sql.DB
 	dsn        string
 	host       string
 	driverName string
-	isMaster   bool
-	isActive   bool
+	isMaster   atomic.Bool
+	isActive   atomic.Bool
+	isPending  atomic.Bool
+	msg        chan ConnectInstruction
 }
 
 type ConnectionManager struct {
 	connections []*DatabaseConnection // Physical databases
 	serverType  string
-	next        uint
+	next        atomic.Uint32
 }
 
 // Open concurrently opens each underlying physical db.
@@ -42,6 +58,7 @@ func ConnectionOpen(driverName, dataSourceNames string) (*ConnectionManager, err
 
 	for i := range conns {
 		db.connections[i] = newConnection(driverName, conns[i])
+		db.connections[i].msg <- ConnectInstruction{Message: Connect}
 		db.serverType = driverName
 	}
 
@@ -78,40 +95,108 @@ func newConnection(driverName, dsn string) *DatabaseConnection {
 	dc.driverName = driverName
 	dc.dsn = dsn
 	dc.host = host
+	dc.msg = make(chan ConnectInstruction)
 
-	dc.connect()
+	// Start the connection manager loop
+	go func() {
+		var err error
+
+		for {
+			msg := <-dc.msg
+			switch msg.Message {
+			case Connect:
+				fmt.Println("Attempting connection to " + dc.host + " using " + dc.driverName + " driver")
+				if dc.connection != nil {
+					dc.connection.Close()
+				}
+
+				dc.connection, err = sql.Open(dc.driverName, dc.dsn)
+
+				if err == nil {
+					go func() {
+						dc.msg <- ConnectInstruction{Message: Ping}
+					}()
+				} else {
+					// Queue up a reconnect
+					fmt.Println("Connection to " + dc.host + " failed with message: " + err.Error())
+					time.Sleep(5 * time.Second)
+					go func() {
+						dc.msg <- ConnectInstruction{Message: Connect}
+					}()
+				}
+			case Ping:
+				// Ping the database
+				var status error
+				var ctx *context.Context
+
+				if msg.Data != nil {
+					ctx = msg.Data.(*context.Context)
+				}
+
+				fmt.Println("Checking health of host " + dc.host)
+
+				if ctx != nil {
+					status = dc.connection.PingContext(*ctx)
+				} else {
+					status = dc.connection.Ping()
+				}
+
+				if status != nil {
+					// Close and begin connection loop
+					fmt.Println("Host " + dc.host + " is OFFLINE - " + status.Error())
+					dc.isActive.Store(false)
+
+					// Queue up a reconnect
+					fmt.Println("Connection to " + dc.host + " failed with message: " + status.Error())
+					time.Sleep(5 * time.Second)
+					go func() { dc.msg <- ConnectInstruction{Message: Connect} }()
+				}
+
+				dc.isActive.Store(true)
+
+				// Check whether it's a master or a slave
+				switch dc.driverName {
+				case "mysql":
+					{
+						var (
+							readOnly      int
+							superReadOnly int
+						)
+
+						rowData := dc.connection.QueryRow("SELECT @@global.read_only, @@global.super_read_only;")
+						err := rowData.Scan(&readOnly, &superReadOnly)
+
+						if err == sql.ErrNoRows || (readOnly == 0 && superReadOnly == 0) {
+
+							dc.isMaster.Store(true)
+						} else {
+							dc.isMaster.Store(false)
+						}
+					}
+				default:
+					dc.isMaster.Store(true)
+				}
+
+				if dc.isMaster.Load() {
+					fmt.Println("Host " + dc.host + " is ONLINE as a MASTER")
+				} else {
+					fmt.Println("Host " + dc.host + " is ONLINE as a SLAVE")
+				}
+			case BadConnection:
+				dc.isActive.Store(false)
+				time.Sleep(1 * time.Second)
+				go func() { dc.msg <- ConnectInstruction{Message: Connect} }()
+			}
+		}
+	}()
 
 	return dc
 }
 
-func (conn *DatabaseConnection) connect() {
-	var err error
-	fmt.Println("Attempting connection to " + conn.host + " using " + conn.driverName + " driver")
-
-	conn.connection, err = sql.Open(conn.driverName, conn.dsn)
-
-	if err == nil {
-		// Check the connection
-		go func() {
-			conn.updateStatus(nil)
-		}()
-	} else {
-		// Queue up a reconnect
-		fmt.Println("Connection to " + conn.host + " failed with message: " + err.Error())
-		go func() {
-			time.Sleep(5 * time.Second)
-			conn.connect()
-		}()
-	}
-}
-
-func (db *ConnectionManager) ShouldRetry(err error) bool {
-	if err == nil {
+func (db *ConnectionManager) ShouldRetry(err error, host string) bool {
+	if err == nil || err.Error() == "record not found" || strings.Contains(err.Error(), "Duplicate") {
 		return false
 	}
-
-	fmt.Println("Process Error:")
-	fmt.Println(err)
 
 	mysqlErrors := []string{
 		"Error 1290", // Server is read only
@@ -121,67 +206,31 @@ func (db *ConnectionManager) ShouldRetry(err error) bool {
 		"connectex",  // Connection error
 		"database is closed",
 		"invalid connection",
+		"i/o timeout",
 	}
 
 	for _, errStr := range mysqlErrors {
 		if strings.Contains(err.Error(), errStr) {
-			_ = db.Ping()
-			return true
+			for _, conn := range db.connections {
+				if conn.host == host || strings.Contains(err.Error(), conn.host) {
+					conn.setBadConnection()
+
+					time.Sleep(500 * time.Millisecond)
+					return true
+				}
+			}
 		}
 	}
 
 	return false
 }
 
-func (conn *DatabaseConnection) updateStatus(ctx *context.Context) {
-	// Ping the database
-	var status error
-	fmt.Println("Checking health of host " + conn.host)
-
-	if ctx != nil {
-		status = conn.connection.PingContext(*ctx)
-	} else {
-		status = conn.connection.Ping()
-	}
-
-	if status != nil {
-		// Close and begin connection loop
-		fmt.Println("Host " + conn.host + " is OFFLINE - " + status.Error())
-		conn.isActive = false
-		_ = conn.connection.Close()
-		time.Sleep(5 * time.Second)
-		conn.connect()
-		return
-	}
-
-	conn.isActive = true
-
-	// Check whether it's a master or a slave
-	switch conn.driverName {
-	case "mysql":
-		{
-			var (
-				readOnly      int
-				superReadOnly int
-			)
-
-			rowData := conn.connection.QueryRow("SELECT @@global.read_only, @@global.super_read_only;")
-			err := rowData.Scan(&readOnly, &superReadOnly)
-
-			if err == sql.ErrNoRows || (readOnly == 0 && superReadOnly == 0) {
-				conn.isMaster = true
-			} else {
-				conn.isMaster = false
-			}
-		}
+func (conn *DatabaseConnection) setBadConnection() {
+	select {
+	case conn.msg <- ConnectInstruction{Message: BadConnection}:
+		break
 	default:
-		conn.isMaster = true
-	}
-
-	if conn.isMaster {
-		fmt.Println("Host " + conn.host + " is ONLINE as a MASTER")
-	} else {
-		fmt.Println("Host " + conn.host + " is ONLINE as a SLAVE")
+		break
 	}
 }
 
@@ -191,8 +240,8 @@ func (db *ConnectionManager) Close() error {
 		conn := db.connections[i]
 		fmt.Println("Closing connection to " + conn.host)
 
-		conn.isActive = false
-		conn.isMaster = false
+		conn.isActive.Store(false)
+		conn.isMaster.Store(false)
 		_ = conn.connection.Close()
 	}
 
@@ -211,7 +260,7 @@ func (db *ConnectionManager) Driver() driver.Driver {
 
 	if d == nil {
 		// Reconnect the master and attempt to run the query again
-		db.connections[i].updateStatus(nil)
+		db.connections[i].setBadConnection()
 
 		return db.Driver()
 	}
@@ -236,7 +285,7 @@ func (db *ConnectionManager) BeginHost() (*sql.Tx, string, error) {
 
 	if err == driver.ErrBadConn {
 		// Reconnect the master and attempt to run the query again
-		db.connections[i].updateStatus(nil)
+		db.connections[i].setBadConnection()
 
 		return db.BeginHost()
 	}
@@ -265,7 +314,7 @@ func (db *ConnectionManager) BeginHostTx(ctx context.Context, opts *sql.TxOption
 
 	if err == driver.ErrBadConn {
 		// Reconnect the master and attempt to run the query again
-		db.connections[i].updateStatus(nil)
+		db.connections[i].setBadConnection()
 
 		return db.BeginHostTx(ctx, opts)
 	}
@@ -287,7 +336,7 @@ func (db *ConnectionManager) Exec(query string, args ...interface{}) (sql.Result
 
 	if err == driver.ErrBadConn {
 		// Reconnect the master and attempt to run the query again
-		db.connections[i].updateStatus(nil)
+		db.connections[i].setBadConnection()
 		return db.Exec(query, args...)
 	}
 
@@ -308,7 +357,7 @@ func (db *ConnectionManager) ExecContext(ctx context.Context, query string, args
 
 	if err == driver.ErrBadConn {
 		// Reconnect the master and attempt to run the query again
-		db.connections[i].updateStatus(&ctx)
+		db.connections[i].setBadConnection()
 
 		return db.ExecContext(ctx, query, args...)
 	}
@@ -329,7 +378,7 @@ func (db ConnectionManager) waitForMaster() error {
 func (db *ConnectionManager) Ping() error {
 	fmt.Println("Pinging all nodes")
 	for i := range db.connections {
-		go db.connections[i].updateStatus(nil)
+		db.connections[i].msg <- ConnectInstruction{Message: Ping}
 	}
 
 	return nil
@@ -340,7 +389,7 @@ func (db *ConnectionManager) Ping() error {
 func (db *ConnectionManager) PingContext(ctx context.Context) error {
 	fmt.Println("Pinging all nodes with context")
 	for i := range db.connections {
-		go db.connections[i].updateStatus(&ctx)
+		db.connections[i].msg <- ConnectInstruction{Message: Ping, Data: ctx}
 	}
 
 	return nil
@@ -403,7 +452,7 @@ func (db *ConnectionManager) QueryHost(query string, args ...interface{}) (*sql.
 
 	if err == driver.ErrBadConn {
 		// Reconnect the node and attempt to run the query again
-		db.connections[i].updateStatus(nil)
+		db.connections[i].setBadConnection()
 
 		return db.QueryHost(query, args...)
 	}
@@ -430,7 +479,7 @@ func (db *ConnectionManager) QueryHostContext(ctx context.Context, query string,
 
 	if err == driver.ErrBadConn {
 		// Reconnect the node and attempt to run the query again
-		db.connections[i].updateStatus(&ctx)
+		db.connections[i].setBadConnection()
 
 		return db.QueryHostContext(ctx, query, args...)
 	}
@@ -459,7 +508,7 @@ func (db *ConnectionManager) QueryHostRow(query string, args ...interface{}) (*s
 
 	if err == driver.ErrBadConn {
 		// Reconnect the node and attempt to run the query again
-		db.connections[i].updateStatus(nil)
+		db.connections[i].setBadConnection()
 
 		return db.QueryHostRow(query, args...)
 	}
@@ -488,7 +537,7 @@ func (db *ConnectionManager) QueryHostRowContext(ctx context.Context, query stri
 
 	if err == driver.ErrBadConn {
 		// Reconnect the node and attempt to run the query again
-		db.connections[i].updateStatus(nil)
+		db.connections[i].setBadConnection()
 
 		return db.QueryHostRowContext(ctx, query, args...)
 	}
@@ -532,7 +581,7 @@ func (db *ConnectionManager) SetConnMaxLifetime(d time.Duration) {
 func (db *ConnectionManager) Slave() (*sql.DB, int) {
 	var candidates []int
 	for i := range db.connections {
-		if db.connections[i].isActive && !db.connections[i].isMaster {
+		if db.connections[i].isActive.Load() && !db.connections[i].isMaster.Load() {
 			candidates = append(candidates, i)
 		}
 	}
@@ -540,8 +589,8 @@ func (db *ConnectionManager) Slave() (*sql.DB, int) {
 	if len(candidates) == 0 {
 		// Only return the master if there are no active slaves
 		for i := range db.connections {
-			if db.connections[i].isActive && db.connections[i].isMaster {
-				db.next = 0 // Reset the next server so we do a full sweep
+			if db.connections[i].isActive.Load() && db.connections[i].isMaster.Load() {
+				db.next.Store(0) // Reset the next server so we do a full sweep
 				candidates = append(candidates, i)
 			}
 		}
@@ -551,9 +600,9 @@ func (db *ConnectionManager) Slave() (*sql.DB, int) {
 	if len(candidates) == 0 {
 		// We've fallen through which means no active servers
 		fmt.Println("Request for SLAVE node pending but none available. Waiting for 3 seconds...")
-		db.next = 0 // Reset the next server so we do a full sweep
+		db.next.Store(0) // Reset the next server so we do a full sweep
 		for i := range db.connections {
-			go db.connections[i].updateStatus(nil)
+			go db.connections[i].setBadConnection()
 		}
 
 		time.Sleep(3 * time.Second)
@@ -562,12 +611,12 @@ func (db *ConnectionManager) Slave() (*sql.DB, int) {
 
 	// Go through the candidates and get the next matching host and the following
 	for _, c := range candidates {
-		if c >= int(db.next) {
+		if c >= int(db.next.Load()) {
 			// Set the next host to the next candidate
 			if c < len(candidates) {
-				db.next = uint(c + 1)
+				db.next.Store(uint32(c + 1))
 			} else {
-				db.next = 0
+				db.next.Store(0)
 			}
 
 			return db.connections[c].connection, c
@@ -575,14 +624,14 @@ func (db *ConnectionManager) Slave() (*sql.DB, int) {
 	}
 
 	// Unable to fulfill next server requirement so reset and try again immediately
-	db.next = 0
+	db.next.Store(0)
 	return db.Slave()
 }
 
 // Master returns the master physical database
 func (db *ConnectionManager) Master() (*sql.DB, int) {
 	for i := range db.connections {
-		if db.connections[i].isMaster && db.connections[i].isActive {
+		if db.connections[i].isMaster.Load() && db.connections[i].isActive.Load() {
 			return db.connections[i].connection, i
 		}
 	}
@@ -590,7 +639,7 @@ func (db *ConnectionManager) Master() (*sql.DB, int) {
 	// If there is no master yet available, wait for one to become available
 	fmt.Println("Request for MASTER node pending but none available. Checking for new masters and waiting for 3 seconds...")
 	for i := range db.connections {
-		go db.connections[i].updateStatus(nil)
+		go db.connections[i].setBadConnection()
 	}
 
 	time.Sleep(3 * time.Second)

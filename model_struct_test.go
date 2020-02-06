@@ -1,10 +1,9 @@
 package gorm_test
 
 import (
+	"github.com/charm-jp/gorm"
 	"sync"
 	"testing"
-
-	"github.com/jinzhu/gorm"
 )
 
 type ModelA struct {

@@ -71,8 +71,7 @@ func queryCallback(scope *Scope) {
 		readFromDB := true
 
 		key := fmt.Sprint(scope.SQL, scope.SQLVars)
-
-		host := "unknown"
+		scope.HostType = scope.SQLDB().(*ConnectionManager).serverType
 		cacheType := "not"
 		if cacheOperation != nil {
 			// If the time is > 0, simply provide the cached results
@@ -90,7 +89,7 @@ func queryCallback(scope *Scope) {
 					}
 
 					cacheType = "hit"
-					host = "memory-cache"
+					scope.Host = "memory-cache"
 					readFromDB = false
 				} else {
 					readFromDB = true
@@ -103,9 +102,11 @@ func queryCallback(scope *Scope) {
 				writeToCache = true
 			}
 		}
+		scope.CacheResult = cacheType
 
 		if readFromDB {
 			if rows, h, err := scope.SQLDB().(*ConnectionManager).QueryHost(scope.SQL, scope.SQLVars...); scope.Err(err) == nil {
+				defer func() { scope.Host = h }()
 				defer rows.Close()
 
 				columns, _ := rows.Columns()
@@ -133,8 +134,6 @@ func queryCallback(scope *Scope) {
 				} else if scope.db.RowsAffected == 0 && !isSlice {
 					scope.Err(ErrRecordNotFound)
 				}
-
-				host = h
 			}
 		}
 
@@ -143,9 +142,6 @@ func queryCallback(scope *Scope) {
 			scope.CacheStore().StoreItem(key, results.Interface(), scope.db.Error)
 		}
 
-		scope.HostType = scope.SQLDB().(*ConnectionManager).serverType
-		scope.Host = host
-		scope.CacheResult = cacheType
 	}
 }
 

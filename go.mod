@@ -10,5 +10,6 @@ require (
 	github.com/jinzhu/now v1.0.1
 	github.com/lib/pq v1.1.1
 	github.com/mattn/go-sqlite3 v2.0.1+incompatible
-	github.com/tsenart/nap v0.0.0-20190313104555-a650a3fbb7be
+	go.uber.org/atomic v1.5.1
+	google.golang.org/appengine v1.6.5 // indirect
 )

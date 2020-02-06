@@ -945,7 +945,7 @@ func (scope *Scope) callCallbacks(funcs []*func(s *Scope)) *Scope {
 	}
 
 	// If there are certain failures, attempt to run the chain again
-	if scope.db.db.(*ConnectionManager).ShouldRetry(scope.db.Error) {
+	if scope.db.db.(*ConnectionManager).ShouldRetry(scope.db.Error, scope.Host) {
 		fmt.Println("Clearing error and retrying request...")
 		scope.db.Error = nil
 		return originalScope.callCallbacks(funcs)
