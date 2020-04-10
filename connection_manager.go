@@ -150,6 +150,7 @@ func newConnection(driverName, dsn string) *DatabaseConnection {
 					fmt.Println("Connection to " + dc.host + " failed with message: " + status.Error())
 					time.Sleep(5 * time.Second)
 					go func() { dc.msg <- ConnectInstruction{Message: Connect} }()
+					break
 				}
 
 				dc.isActive.Store(true)
@@ -167,7 +168,6 @@ func newConnection(driverName, dsn string) *DatabaseConnection {
 						err := rowData.Scan(&readOnly, &superReadOnly)
 
 						if err == sql.ErrNoRows || (readOnly == 0 && superReadOnly == 0) {
-
 							dc.isMaster.Store(true)
 						} else {
 							dc.isMaster.Store(false)
