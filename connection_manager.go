@@ -213,7 +213,7 @@ func (db *ConnectionManager) ShouldRetry(err error, host string) bool {
 		if strings.Contains(err.Error(), errStr) {
 			for _, conn := range db.connections {
 				if conn.host == host || strings.Contains(err.Error(), conn.host) {
-					conn.setBadConnection()
+					conn.setBadConnection(err)
 
 					time.Sleep(500 * time.Millisecond)
 					return true
@@ -225,7 +225,9 @@ func (db *ConnectionManager) ShouldRetry(err error, host string) bool {
 	return false
 }
 
-func (conn *DatabaseConnection) setBadConnection() {
+func (conn *DatabaseConnection) setBadConnection(err error) {
+	fmt.Sprintf("Setting [%s](%s) connection as bad for reason: %s\n", conn.driverName, conn.host, err.Error())
+
 	select {
 	case conn.msg <- ConnectInstruction{Message: BadConnection}:
 		break
@@ -260,7 +262,7 @@ func (db *ConnectionManager) Driver() driver.Driver {
 
 	if d == nil {
 		// Reconnect the master and attempt to run the query again
-		db.connections[i].setBadConnection()
+		db.connections[i].setBadConnection(errors.New("driver is nil"))
 
 		return db.Driver()
 	}
@@ -285,7 +287,7 @@ func (db *ConnectionManager) BeginHost() (*sql.Tx, string, error) {
 
 	if err == driver.ErrBadConn {
 		// Reconnect the master and attempt to run the query again
-		db.connections[i].setBadConnection()
+		db.connections[i].setBadConnection(err)
 
 		return db.BeginHost()
 	}
@@ -314,7 +316,7 @@ func (db *ConnectionManager) BeginHostTx(ctx context.Context, opts *sql.TxOption
 
 	if err == driver.ErrBadConn {
 		// Reconnect the master and attempt to run the query again
-		db.connections[i].setBadConnection()
+		db.connections[i].setBadConnection(err)
 
 		return db.BeginHostTx(ctx, opts)
 	}
@@ -336,7 +338,7 @@ func (db *ConnectionManager) Exec(query string, args ...interface{}) (sql.Result
 
 	if err == driver.ErrBadConn {
 		// Reconnect the master and attempt to run the query again
-		db.connections[i].setBadConnection()
+		db.connections[i].setBadConnection(err)
 		return db.Exec(query, args...)
 	}
 
@@ -357,7 +359,7 @@ func (db *ConnectionManager) ExecContext(ctx context.Context, query string, args
 
 	if err == driver.ErrBadConn {
 		// Reconnect the master and attempt to run the query again
-		db.connections[i].setBadConnection()
+		db.connections[i].setBadConnection(err)
 
 		return db.ExecContext(ctx, query, args...)
 	}
@@ -452,7 +454,7 @@ func (db *ConnectionManager) QueryHost(query string, args ...interface{}) (*sql.
 
 	if err == driver.ErrBadConn {
 		// Reconnect the node and attempt to run the query again
-		db.connections[i].setBadConnection()
+		db.connections[i].setBadConnection(err)
 
 		return db.QueryHost(query, args...)
 	}
@@ -479,7 +481,7 @@ func (db *ConnectionManager) QueryHostContext(ctx context.Context, query string,
 
 	if err == driver.ErrBadConn {
 		// Reconnect the node and attempt to run the query again
-		db.connections[i].setBadConnection()
+		db.connections[i].setBadConnection(err)
 
 		return db.QueryHostContext(ctx, query, args...)
 	}
@@ -508,7 +510,7 @@ func (db *ConnectionManager) QueryHostRow(query string, args ...interface{}) (*s
 
 	if err == driver.ErrBadConn {
 		// Reconnect the node and attempt to run the query again
-		db.connections[i].setBadConnection()
+		db.connections[i].setBadConnection(err)
 
 		return db.QueryHostRow(query, args...)
 	}
@@ -537,7 +539,7 @@ func (db *ConnectionManager) QueryHostRowContext(ctx context.Context, query stri
 
 	if err == driver.ErrBadConn {
 		// Reconnect the node and attempt to run the query again
-		db.connections[i].setBadConnection()
+		db.connections[i].setBadConnection(err)
 
 		return db.QueryHostRowContext(ctx, query, args...)
 	}
@@ -587,6 +589,8 @@ func (db *ConnectionManager) Slave() (*sql.DB, int) {
 	}
 
 	if len(candidates) == 0 {
+		fmt.Println("Request for read (SLAVE) node but none found! Trying MASTER node..")
+
 		// Only return the master if there are no active slaves
 		for i := range db.connections {
 			if db.connections[i].isActive.Load() && db.connections[i].isMaster.Load() {
@@ -599,10 +603,10 @@ func (db *ConnectionManager) Slave() (*sql.DB, int) {
 	// If there are still no candidates attempt a retry
 	if len(candidates) == 0 {
 		// We've fallen through which means no active servers
-		fmt.Println("Request for SLAVE node pending but none available. Waiting for 3 seconds...")
+		fmt.Println("Request for read node pending but none available. Waiting for 3 seconds...")
 		db.next.Store(0) // Reset the next server so we do a full sweep
 		for i := range db.connections {
-			go db.connections[i].setBadConnection()
+			go db.connections[i].setBadConnection(errors.New("no nodes available: ensuring connection is marked for reconnection"))
 		}
 
 		time.Sleep(3 * time.Second)
@@ -639,7 +643,7 @@ func (db *ConnectionManager) Master() (*sql.DB, int) {
 	// If there is no master yet available, wait for one to become available
 	fmt.Println("Request for MASTER node pending but none available. Checking for new masters and waiting for 3 seconds...")
 	for i := range db.connections {
-		go db.connections[i].setBadConnection()
+		go db.connections[i].setBadConnection(errors.New("no nodes available: ensuring connection is marked for reconnection"))
 	}
 
 	time.Sleep(3 * time.Second)
