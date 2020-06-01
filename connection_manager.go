@@ -589,8 +589,6 @@ func (db *ConnectionManager) Slave() (*sql.DB, int) {
 	}
 
 	if len(candidates) == 0 {
-		fmt.Println("Request for read (SLAVE) node but none found! Trying MASTER node..")
-
 		// Only return the master if there are no active slaves
 		for i := range db.connections {
 			if db.connections[i].isActive.Load() && db.connections[i].isMaster.Load() {
@@ -641,7 +639,7 @@ func (db *ConnectionManager) Master() (*sql.DB, int) {
 	}
 
 	// If there is no master yet available, wait for one to become available
-	fmt.Println("Request for MASTER node pending but none available. Checking for new masters and waiting for 3 seconds...")
+	fmt.Println("Request for write node pending but none available. Checking for new masters and waiting for 3 seconds...")
 	for i := range db.connections {
 		go db.connections[i].setBadConnection(errors.New("no nodes available: ensuring connection is marked for reconnection"))
 	}
