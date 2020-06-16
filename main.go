@@ -94,7 +94,7 @@ func Open(dialect string, args ...interface{}) (db *DB, err error) {
 		return
 	}
 	// Send a ping to make sure the database connection is alive.
-	if d, ok := dbSQL.(*ConnectionManager); ok {
+	if d, ok := dbSQL.(*sql.DB); ok {
 		if err = d.Ping(); err != nil && ownDbSQL {
 			d.Close()
 		}
@@ -124,8 +124,11 @@ func (s *DB) Close() error {
 
 // DB get `*sql.DB` from current connection
 // If the underlying database connection is not a *sql.DB, returns nil
-func (s *DB) DB() *ConnectionManager {
-	db, _ := s.db.(*ConnectionManager)
+func (s *DB) DB() *sql.DB {
+	db, ok := s.db.(*sql.DB)
+	if !ok {
+		panic("can't support full GORM on currently status, maybe this is a TX instance.")
+	}
 	return db
 }
 
@@ -552,6 +555,28 @@ func (s *DB) ParameterisedTable(query string, args ...interface{}) *DB {
 // Debug start debug mode
 func (s *DB) Debug() *DB {
 	return s.clone().LogMode(true)
+}
+
+// Transaction start a transaction as a block,
+// return error will rollback, otherwise to commit.
+func (s *DB) Transaction(fc func(tx *DB) error) (err error) {
+	panicked := true
+	tx := s.Begin()
+	defer func() {
+		// Make sure to rollback when panic, Block error or Commit error
+		if panicked || err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	err = fc(tx)
+
+	if err == nil {
+		err = tx.Commit().Error
+	}
+
+	panicked = false
+	return
 }
 
 // Begin begins a transaction

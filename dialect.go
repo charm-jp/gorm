@@ -39,7 +39,7 @@ type Dialect interface {
 	HasTop(limit interface{}) string
 
 	// LimitAndOffsetSQL return generated SQL with Limit and Offset, as mssql has special case
-	LimitAndOffsetSQL(limit, offset interface{}) string
+	LimitAndOffsetSQL(limit, offset interface{}) (string, error)
 	// SelectFromDummyTable return select values, for most dbs, `SELECT values` just works, mysql needs `SELECT value FROM DUAL`
 	SelectFromDummyTable() string
 	// LastInsertIDOutputInterstitial most dbs support LastInsertId, but mssql needs to use `OUTPUT`
