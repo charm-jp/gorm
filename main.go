@@ -26,6 +26,7 @@ type DB struct {
 	search            *search
 	cache             *cache
 	values            sync.Map
+	context           context.Context
 
 	// global db
 	parent        *DB
@@ -124,8 +125,8 @@ func (s *DB) Close() error {
 
 // DB get `*sql.DB` from current connection
 // If the underlying database connection is not a *sql.DB, returns nil
-func (s *DB) DB() *sql.DB {
-	db, ok := s.db.(*sql.DB)
+func (s *DB) DB() *ConnectionManager {
+	db, ok := s.db.(*ConnectionManager)
 	if !ok {
 		panic("can't support full GORM on currently status, maybe this is a TX instance.")
 	}
@@ -788,6 +789,12 @@ func (s *DB) Association(column string) *Association {
 	return &Association{Error: err}
 }
 
+func (s *DB) WithContext(ctx context.Context) *DB {
+	clone := s.clone()
+	clone.context = ctx
+	return clone
+}
+
 // Preload preload associations with given conditions
 //    db.Preload("Orders", "state NOT IN (?)", "cancelled").Find(&users)
 func (s *DB) Preload(column string, conditions ...interface{}) *DB {
@@ -875,6 +882,7 @@ func (s *DB) clone() *DB {
 		Error:             s.Error,
 		blockGlobalUpdate: s.blockGlobalUpdate,
 		dialect:           newDialect(s.dialect.GetName(), s.db),
+		context:           s.context,
 		nowFuncOverride:   s.nowFuncOverride,
 	}
 
@@ -887,6 +895,11 @@ func (s *DB) clone() *DB {
 		db.search = &search{limit: -1, offset: -1}
 	} else {
 		db.search = s.search.clone()
+	}
+
+	// Ensure the context is set to at least something
+	if db.context == nil {
+		db.context = context.Background()
 	}
 
 	db.search.db = db

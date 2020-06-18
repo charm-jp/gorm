@@ -436,34 +436,34 @@ func (db *ConnectionManager) PrepareContext(ctx context.Context, query string) (
 }
 
 func (db *ConnectionManager) Query(query string, args ...interface{}) (*sql.Rows, error) {
-	result, _, err := db.QueryHost(query, args...)
+	result, _, err := db.QueryHost(context.Background(), query, args...)
 	return result, err
 }
 
 // Query executes a query that returns rows, typically a SELECT.
 // The args are for any placeholder parameters in the query.
 // Query uses a slave as the physical db.
-func (db *ConnectionManager) QueryHost(query string, args ...interface{}) (*sql.Rows, string, error) {
+func (db *ConnectionManager) QueryHost(ctx context.Context, query string, args ...interface{}) (*sql.Rows, string, error) {
 	m, i := db.Slave()
 
 	if m == nil {
 		return nil, "", NoHost
 	}
 
-	result, err := m.Query(query, args...)
+	result, err := m.QueryContext(ctx, query, args...)
 
 	if err == driver.ErrBadConn {
 		// Reconnect the node and attempt to run the query again
 		db.connections[i].setBadConnection(err)
 
-		return db.QueryHost(query, args...)
+		return db.QueryHost(ctx, query, args...)
 	}
 
 	return result, db.connections[i].host, err
 }
 
 func (db *ConnectionManager) QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error) {
-	result, _, err := db.QueryHost(query, args...)
+	result, _, err := db.QueryHost(ctx, query, args...)
 	return result, err
 }
 

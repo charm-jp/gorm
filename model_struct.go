@@ -70,19 +70,20 @@ func (s *ModelStruct) Cache(db *DB) *int64 {
 
 // StructField model field's struct definition
 type StructField struct {
-	DBName          string
-	Name            string
-	Names           []string
-	IsPrimaryKey    bool
-	IsNormal        bool
-	IsIgnored       bool
-	IsScanner       bool
-	HasDefaultValue bool
-	Tag             reflect.StructTag
-	TagSettings     map[string]string
-	Struct          reflect.StructField
-	IsForeignKey    bool
-	Relationship    *Relationship
+	DBName               string
+	Name                 string
+	Names                []string
+	IsPrimaryKey         bool
+	IsNormal             bool
+	IsIgnored            bool
+	IsScanner            bool
+	HasDefaultValue      bool
+	HasNilOverridenValue bool
+	Tag                  reflect.StructTag
+	TagSettings          map[string]string
+	Struct               reflect.StructField
+	IsForeignKey         bool
+	Relationship         *Relationship
 
 	tagSettingsLock sync.RWMutex
 }
@@ -111,18 +112,19 @@ func (sf *StructField) TagSettingsDelete(key string) {
 
 func (sf *StructField) clone() *StructField {
 	clone := &StructField{
-		DBName:          sf.DBName,
-		Name:            sf.Name,
-		Names:           sf.Names,
-		IsPrimaryKey:    sf.IsPrimaryKey,
-		IsNormal:        sf.IsNormal,
-		IsIgnored:       sf.IsIgnored,
-		IsScanner:       sf.IsScanner,
-		HasDefaultValue: sf.HasDefaultValue,
-		Tag:             sf.Tag,
-		TagSettings:     map[string]string{},
-		Struct:          sf.Struct,
-		IsForeignKey:    sf.IsForeignKey,
+		DBName:               sf.DBName,
+		Name:                 sf.Name,
+		Names:                sf.Names,
+		IsPrimaryKey:         sf.IsPrimaryKey,
+		IsNormal:             sf.IsNormal,
+		IsIgnored:            sf.IsIgnored,
+		IsScanner:            sf.IsScanner,
+		HasDefaultValue:      sf.HasDefaultValue,
+		HasNilOverridenValue: sf.HasNilOverridenValue,
+		Tag:                  sf.Tag,
+		TagSettings:          map[string]string{},
+		Struct:               sf.Struct,
+		IsForeignKey:         sf.IsForeignKey,
 	}
 
 	if sf.Relationship != nil {
@@ -220,6 +222,11 @@ func (scope *Scope) GetModelStruct() *ModelStruct {
 
 				if _, ok := field.TagSettingsGet("DEFAULT"); ok && !field.IsPrimaryKey {
 					field.HasDefaultValue = true
+				}
+
+				if _, ok := field.TagSettingsGet("ON_NIL"); ok {
+					field.HasDefaultValue = true
+					field.HasNilOverridenValue = true
 				}
 
 				if _, ok := field.TagSettingsGet("AUTO_INCREMENT"); ok && !field.IsPrimaryKey {

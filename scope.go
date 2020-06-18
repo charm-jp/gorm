@@ -946,15 +946,21 @@ func (scope *Scope) callCallbacks(funcs []*func(s *Scope)) *Scope {
 		}
 	}
 
-	// If there are certain failures, attempt to run the chain again
-	if scope.db.db.(*ConnectionManager).ShouldRetry(scope.db.Error, scope.Host) {
-		fmt.Println("Clearing error and retrying request...")
-		scope.db.Error = nil
-		return originalScope.callCallbacks(funcs)
-	} else {
-		//fmt.Println("Callbacks completed")
+	switch scope.SQLDB().(type) {
+	case sqlTx:
 		return scope
+	case *ConnectionManager:
+		if scope.db.db.(*ConnectionManager).ShouldRetry(scope.db.Error, scope.Host) {
+			fmt.Println("Clearing error and retrying request...")
+			scope.db.Error = nil
+			return originalScope.callCallbacks(funcs)
+		} else {
+			//fmt.Println("Callbacks completed")
+			return scope
+		}
 	}
+
+	return scope
 }
 
 func convertInterfaceToMap(values interface{}, withIgnoredField bool, db *DB) map[string]interface{} {
