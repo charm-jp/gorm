@@ -1,6 +1,7 @@
 package gorm
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"reflect"
@@ -24,7 +25,7 @@ func queryCallback(scope *Scope) {
 		return
 	}
 
-	defer scope.trace(scope.db.nowFunc())
+	defer scope.trace(NowFunc())
 
 	var (
 		isSlice, isPtr bool
@@ -60,53 +61,22 @@ func queryCallback(scope *Scope) {
 
 	if !scope.HasError() {
 		scope.db.RowsAffected = 0
+
+		if str, ok := scope.Get("gorm:query_hint"); ok {
+			scope.SQL = fmt.Sprint(str) + scope.SQL
+		}
+
 		if str, ok := scope.Get("gorm:query_option"); ok {
 			scope.SQL += addExtraSpaceIfExist(fmt.Sprint(str))
 		}
 
-		// Work out if we can return a result from cache
-		cacheOperation := scope.Cache()
+		switch scope.db.db.(type) {
+		case *sql.Tx:
+			db := scope.SQLDB().(*sql.Tx)
+			scope.Host = "master"
+			scope.CacheResult = "tx"
 
-		writeToCache := false
-		readFromDB := true
-
-		key := fmt.Sprint(scope.SQL, scope.SQLVars)
-		scope.HostType = scope.SQLDB().(*ConnectionManager).serverType
-		cacheType := "not"
-		if cacheOperation != nil {
-			// If the time is > 0, simply provide the cached results
-			if *cacheOperation > 0 || *cacheOperation == -1 {
-				cacheResults, err := scope.CacheStore().GetItem(key, *cacheOperation)
-				if cacheResults != nil {
-					scope.Err(err) // Add any error if exists
-					results.Set(reflect.ValueOf(cacheResults))
-
-					switch reflect.ValueOf(cacheResults).Type().Kind() {
-					case reflect.Struct:
-						scope.db.RowsAffected = 1
-					case reflect.Slice:
-						scope.db.RowsAffected = int64(reflect.ValueOf(cacheResults).Len())
-					}
-
-					cacheType = "hit"
-					scope.Host = "memory-cache"
-					readFromDB = false
-				} else {
-					readFromDB = true
-					cacheType = "miss"
-					writeToCache = true
-				}
-			} else {
-				cacheType = "refresh"
-				readFromDB = true
-				writeToCache = true
-			}
-		}
-		scope.CacheResult = cacheType
-
-		if readFromDB {
-			if rows, h, err := scope.SQLDB().(*ConnectionManager).QueryHost(scope.SQL, scope.SQLVars...); scope.Err(err) == nil {
-				defer func() { scope.Host = h }()
+			if rows, err := db.QueryContext(scope.DB().context, scope.SQL, scope.SQLVars...); scope.Err(err) == nil {
 				defer rows.Close()
 
 				columns, _ := rows.Columns()
@@ -135,13 +105,85 @@ func queryCallback(scope *Scope) {
 					scope.Err(ErrRecordNotFound)
 				}
 			}
-		}
+		case *ConnectionManager:
+			// Work out if we can return a result from cache
+			cacheOperation := scope.Cache()
 
-		// If we're allowed, write the results to the cache
-		if writeToCache {
-			scope.CacheStore().StoreItem(key, results.Interface(), scope.db.Error)
-		}
+			writeToCache := false
+			readFromDB := true
 
+			key := fmt.Sprint(scope.SQL, scope.SQLVars)
+			scope.HostType = scope.SQLDB().(*ConnectionManager).serverType
+			cacheType := "not"
+			if cacheOperation != nil {
+				// If the time is > 0, simply provide the cached results
+				if *cacheOperation > 0 || *cacheOperation == -1 {
+					cacheResults, err := scope.CacheStore().GetItem(key, *cacheOperation)
+					if cacheResults != nil {
+						scope.Err(err) // Add any error if exists
+						results.Set(reflect.ValueOf(cacheResults))
+
+						switch reflect.ValueOf(cacheResults).Type().Kind() {
+						case reflect.Struct:
+							scope.db.RowsAffected = 1
+						case reflect.Slice:
+							scope.db.RowsAffected = int64(reflect.ValueOf(cacheResults).Len())
+						}
+
+						cacheType = "hit"
+						scope.Host = "memory-cache"
+						readFromDB = false
+					} else {
+						readFromDB = true
+						cacheType = "miss"
+						writeToCache = true
+					}
+				} else {
+					cacheType = "refresh"
+					readFromDB = true
+					writeToCache = true
+				}
+			}
+			scope.CacheResult = cacheType
+
+			if readFromDB {
+				if rows, h, err := scope.SQLDB().(*ConnectionManager).QueryHost(scope.db.context, scope.SQL, scope.SQLVars...); scope.Err(err) == nil {
+					defer func() { scope.Host = h }()
+					defer rows.Close()
+
+					columns, _ := rows.Columns()
+					for rows.Next() {
+						scope.db.RowsAffected++
+
+						elem := results
+						if isSlice {
+							elem = reflect.New(resultType).Elem()
+						}
+
+						scope.scan(rows, columns, scope.New(elem.Addr().Interface()).Fields())
+
+						if isSlice {
+							if isPtr {
+								results.Set(reflect.Append(results, elem.Addr()))
+							} else {
+								results.Set(reflect.Append(results, elem))
+							}
+						}
+					}
+
+					if err := rows.Err(); err != nil {
+						scope.Err(err)
+					} else if scope.db.RowsAffected == 0 && !isSlice {
+						scope.Err(ErrRecordNotFound)
+					}
+				}
+			}
+
+			// If we're allowed, write the results to the cache
+			if writeToCache {
+				scope.CacheStore().StoreItem(key, results.Interface(), scope.db.Error)
+			}
+		}
 	}
 }
 

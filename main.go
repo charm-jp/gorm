@@ -26,6 +26,7 @@ type DB struct {
 	search            *search
 	cache             *cache
 	values            sync.Map
+	context           context.Context
 
 	// global db
 	parent        *DB
@@ -94,7 +95,7 @@ func Open(dialect string, args ...interface{}) (db *DB, err error) {
 		return
 	}
 	// Send a ping to make sure the database connection is alive.
-	if d, ok := dbSQL.(*ConnectionManager); ok {
+	if d, ok := dbSQL.(*sql.DB); ok {
 		if err = d.Ping(); err != nil && ownDbSQL {
 			d.Close()
 		}
@@ -125,7 +126,10 @@ func (s *DB) Close() error {
 // DB get `*sql.DB` from current connection
 // If the underlying database connection is not a *sql.DB, returns nil
 func (s *DB) DB() *ConnectionManager {
-	db, _ := s.db.(*ConnectionManager)
+	db, ok := s.db.(*ConnectionManager)
+	if !ok {
+		panic("can't support full GORM on currently status, maybe this is a TX instance.")
+	}
 	return db
 }
 
@@ -554,6 +558,28 @@ func (s *DB) Debug() *DB {
 	return s.clone().LogMode(true)
 }
 
+// Transaction start a transaction as a block,
+// return error will rollback, otherwise to commit.
+func (s *DB) Transaction(fc func(tx *DB) error) (err error) {
+	panicked := true
+	tx := s.Begin()
+	defer func() {
+		// Make sure to rollback when panic, Block error or Commit error
+		if panicked || err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	err = fc(tx)
+
+	if err == nil {
+		err = tx.Commit().Error
+	}
+
+	panicked = false
+	return
+}
+
 // Begin begins a transaction
 func (s *DB) Begin() *DB {
 	return s.BeginTx(context.Background(), &sql.TxOptions{})
@@ -763,6 +789,12 @@ func (s *DB) Association(column string) *Association {
 	return &Association{Error: err}
 }
 
+func (s *DB) WithContext(ctx context.Context) *DB {
+	clone := s.clone()
+	clone.context = ctx
+	return clone
+}
+
 // Preload preload associations with given conditions
 //    db.Preload("Orders", "state NOT IN (?)", "cancelled").Find(&users)
 func (s *DB) Preload(column string, conditions ...interface{}) *DB {
@@ -850,6 +882,7 @@ func (s *DB) clone() *DB {
 		Error:             s.Error,
 		blockGlobalUpdate: s.blockGlobalUpdate,
 		dialect:           newDialect(s.dialect.GetName(), s.db),
+		context:           s.context,
 		nowFuncOverride:   s.nowFuncOverride,
 	}
 
@@ -862,6 +895,11 @@ func (s *DB) clone() *DB {
 		db.search = &search{limit: -1, offset: -1}
 	} else {
 		db.search = s.search.clone()
+	}
+
+	// Ensure the context is set to at least something
+	if db.context == nil {
+		db.context = context.Background()
 	}
 
 	db.search.db = db

@@ -178,7 +178,11 @@ func (mssql) HasTop(limit interface{}) (sql string) {
 	return
 }
 
-func (mssql) LimitAndOffsetSQL(limit, offset interface{}) (sql string) {
+func parseInt(value interface{}) (int64, error) {
+	return strconv.ParseInt(fmt.Sprint(value), 0, 0)
+}
+
+func (mssql) LimitAndOffsetSQL(limit, offset interface{}) (sql string, err error) {
 	if offset != nil {
 		//if parsedOffset, err := strconv.ParseInt(fmt.Sprint(offset), 0, 0); err == nil && parsedOffset >= 0 {
 		//	sql += fmt.Sprintf(" OFFSET %d ROWS", parsedOffset)
@@ -198,6 +202,14 @@ func (mssql) LimitAndOffsetSQL(limit, offset interface{}) (sql string) {
 
 func (mssql) SelectFromDummyTable() string {
 	return ""
+}
+
+func (mssql) LastInsertIDReturningPrefix(tableName, columnName string) string {
+	if columnName == "" {
+		// No OUTPUT to query
+		return ""
+	}
+	return fmt.Sprintf("SELECT TOP 0 %v INTO #newIDTable FROM %v UNION ALL SELECT 0 WHERE 1 = 0;", columnName, tableName)
 }
 
 func (mssql) LastInsertIDReturningPrefix(tableName, columnName string) string {

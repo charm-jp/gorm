@@ -50,17 +50,24 @@ func updateTimeStampForCreateCallback(scope *Scope) {
 // createCallback the callback used to insert data into database
 func createCallback(scope *Scope) {
 	if !scope.HasError() {
-		defer scope.trace(scope.db.nowFunc())
+		defer scope.trace(NowFunc())
 
 		var (
 			columns, placeholders        []string
 			blankColumnsWithDefaultValue []string
+			needInlineSQL                bool
 		)
 
 		for _, field := range scope.Fields() {
 			if scope.changeableField(field) {
 				if field.IsNormal && !field.IsIgnored {
-					if field.IsBlank && field.HasDefaultValue {
+					if field.IsBlank && field.HasNilOverridenValue {
+						if replacement, ok := field.TagSettingsGet("ON_NIL"); ok {
+							columns = append(columns, scope.Quote(field.DBName))
+							placeholders = append(placeholders, replacement)
+							needInlineSQL = true
+						}
+					} else if field.IsBlank && field.HasDefaultValue {
 						blankColumnsWithDefaultValue = append(blankColumnsWithDefaultValue, scope.Quote(field.DBName))
 						scope.InstanceSet("gorm:blank_columns_with_default_value", blankColumnsWithDefaultValue)
 					} else if !field.IsPrimaryKey || !field.IsBlank {
@@ -115,8 +122,13 @@ func createCallback(scope *Scope) {
 				addExtraSpaceIfExist(lastInsertIDReturningSuffix),
 			))
 		} else {
+			formatString := "%v INSERT %v INTO %v (%v)%v VALUES (%v)%v%v"
+			if needInlineSQL {
+				formatString = "%v INSERT %v INTO %v (%v)%v SELECT %v %v%v"
+			}
+
 			scope.Raw(fmt.Sprintf(
-				"%v INSERT %v INTO %v (%v)%v VALUES (%v)%v%v",
+				formatString,
 				addExtraSpaceIfExist(lastInsertIDReturningPrefix),
 				addExtraSpaceIfExist(insertModifier),
 				scope.QuotedTableName(),

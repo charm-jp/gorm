@@ -408,7 +408,7 @@ func (scope *Scope) Raw(sql string) *Scope {
 
 // Exec perform generated SQL
 func (scope *Scope) Exec() *Scope {
-	defer scope.trace(scope.db.nowFunc())
+	defer scope.trace(NowFunc())
 
 	if !scope.HasError() {
 		if result, err := scope.SQLDB().Exec(scope.SQL, scope.SQLVars...); scope.Err(err) == nil {
@@ -851,7 +851,9 @@ func (scope *Scope) orderSQL() string {
 }
 
 func (scope *Scope) limitAndOffsetSQL() string {
-	return scope.Dialect().LimitAndOffsetSQL(scope.Search.limit, scope.Search.offset)
+	sql, err := scope.Dialect().LimitAndOffsetSQL(scope.Search.limit, scope.Search.offset)
+	scope.Err(err)
+	return sql
 }
 
 func (scope *Scope) groupSQL() string {
@@ -944,15 +946,21 @@ func (scope *Scope) callCallbacks(funcs []*func(s *Scope)) *Scope {
 		}
 	}
 
-	// If there are certain failures, attempt to run the chain again
-	if scope.db.db.(*ConnectionManager).ShouldRetry(scope.db.Error, scope.Host) {
-		fmt.Println("Clearing error and retrying request...")
-		scope.db.Error = nil
-		return originalScope.callCallbacks(funcs)
-	} else {
-		//fmt.Println("Callbacks completed")
+	switch scope.SQLDB().(type) {
+	case sqlTx:
 		return scope
+	case *ConnectionManager:
+		if scope.db.db.(*ConnectionManager).ShouldRetry(scope.db.Error, scope.Host) {
+			fmt.Println("Clearing error and retrying request...")
+			scope.db.Error = nil
+			return originalScope.callCallbacks(funcs)
+		} else {
+			//fmt.Println("Callbacks completed")
+			return scope
+		}
 	}
+
+	return scope
 }
 
 func convertInterfaceToMap(values interface{}, withIgnoredField bool, db *DB) map[string]interface{} {
@@ -994,28 +1002,32 @@ func (scope *Scope) updatedAttrsWithValues(value interface{}) (results map[strin
 	results = map[string]interface{}{}
 
 	for key, value := range convertInterfaceToMap(value, true, scope.db) {
-		if field, ok := scope.FieldByName(key); ok && scope.changeableField(field) {
-			if _, ok := value.(*SqlExpr); ok {
-				hasUpdate = true
-				results[field.DBName] = value
-			} else {
-				err := field.Set(value)
-				if field.IsNormal && !field.IsIgnored {
+		if field, ok := scope.FieldByName(key); ok {
+			if scope.changeableField(field) {
+				if _, ok := value.(*SqlExpr); ok {
 					hasUpdate = true
-					if err == ErrUnaddressable {
-						results[field.DBName] = value
-					} else {
-						results[field.DBName] = field.Field.Interface()
+					results[field.DBName] = value
+				} else {
+					err := field.Set(value)
+					if field.IsNormal && !field.IsIgnored {
+						hasUpdate = true
+						if err == ErrUnaddressable {
+							results[field.DBName] = value
+						} else {
+							results[field.DBName] = field.Field.Interface()
+						}
 					}
 				}
 			}
+		} else {
+			results[key] = value
 		}
 	}
 	return
 }
 
 func (scope *Scope) row() *sql.Row {
-	defer scope.trace(scope.db.nowFunc())
+	defer scope.trace(NowFunc())
 
 	result := &RowQueryResult{}
 	scope.InstanceSet("row_query_result", result)
@@ -1025,7 +1037,7 @@ func (scope *Scope) row() *sql.Row {
 }
 
 func (scope *Scope) rows() (*sql.Rows, error) {
-	defer scope.trace(scope.db.nowFunc())
+	defer scope.trace(NowFunc())
 
 	result := &RowsQueryResult{}
 	scope.InstanceSet("row_query_result", result)
