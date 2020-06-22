@@ -212,14 +212,6 @@ func (mssql) LastInsertIDReturningPrefix(tableName, columnName string) string {
 	return fmt.Sprintf("SELECT TOP 0 %v INTO #newIDTable FROM %v UNION ALL SELECT 0 WHERE 1 = 0;", columnName, tableName)
 }
 
-func (mssql) LastInsertIDReturningPrefix(tableName, columnName string) string {
-	if columnName == "" {
-		// No OUTPUT to query
-		return ""
-	}
-	return fmt.Sprintf("SELECT TOP 0 %v INTO #newIDTable FROM %v UNION ALL SELECT 0 WHERE 1 = 0;", columnName, tableName)
-}
-
 func (mssql) LastInsertIDOutputInterstitial(tableName, columnName string, columns []string) string {
 	if len(columns) == 0 {
 		// No OUTPUT to query
