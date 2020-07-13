@@ -108,14 +108,19 @@ func queryCallback(scope *Scope) {
 		case *ConnectionManager:
 			// Work out if we can return a result from cache
 			cacheOperation := scope.Cache()
+			syncOperation := scope.Sync()
 
 			writeToCache := false
 			readFromDB := true
 
 			key := fmt.Sprint(scope.SQL, scope.SQLVars)
 			scope.HostType = scope.SQLDB().(*ConnectionManager).serverType
+
 			cacheType := "not"
-			if cacheOperation != nil {
+
+			if syncOperation {
+				cacheType = "sync"
+			} else if cacheOperation != nil {
 				// If the time is > 0, simply provide the cached results
 				if *cacheOperation > 0 || *cacheOperation == -1 {
 					cacheResults, err := scope.CacheStore().GetItem(key, *cacheOperation)
@@ -147,7 +152,7 @@ func queryCallback(scope *Scope) {
 			scope.CacheResult = cacheType
 
 			if readFromDB {
-				if rows, h, err := scope.SQLDB().(*ConnectionManager).QueryHost(scope.db.context, scope.SQL, scope.SQLVars...); scope.Err(err) == nil {
+				if rows, h, err := scope.SQLDB().(*ConnectionManager).QueryHost(scope.db.context, syncOperation, scope.SQL, scope.SQLVars...); scope.Err(err) == nil {
 					defer func() { scope.Host = h }()
 					defer rows.Close()
 

@@ -333,6 +333,10 @@ type cacher interface {
 	Cache() *int64
 }
 
+type syncer interface {
+	Sync() bool
+}
+
 type dbTabler interface {
 	TableName(*DB) string
 }
@@ -347,6 +351,19 @@ func (scope *Scope) Cache() *int64 {
 	}
 
 	return nil
+}
+
+// Sync determines whether slave replicas may be used for SELECT queries
+func (scope *Scope) Sync() bool {
+	if scope.CacheStore() != nil && scope.CacheStore().enabled {
+		if sync, ok := scope.Value.(syncer); ok {
+			return sync.Sync()
+		}
+
+		return scope.GetModelStruct().Sync(scope.db.Model(scope.Value))
+	}
+
+	return false
 }
 
 // TableName return table name
