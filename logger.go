@@ -115,6 +115,8 @@ var LogFormatter = func(values ...interface{}) (messages []interface{}) {
 				cacheMessage = "\033[1;34mREFRESH\033[0m"
 			case "not":
 				cacheMessage = "\033[1;35mNOT\033[0m"
+			case "sync":
+				cacheMessage = "\033[1;35mSYNC\033[0m"
 			}
 
 			messages = append(messages, sql)

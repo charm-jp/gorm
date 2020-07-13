@@ -10,8 +10,7 @@ require (
 	github.com/jinzhu/now v1.0.1
 	github.com/lib/pq v1.1.1
 	github.com/mattn/go-sqlite3 v2.0.1+incompatible
-	golang.org/x/crypto v0.0.0-20191205180655-e7c4368fe9dd // indirect
-	github.com/mattn/go-sqlite3 v2.0.1+incompatible
 	go.uber.org/atomic v1.5.1
+	golang.org/x/crypto v0.0.0-20191205180655-e7c4368fe9dd // indirect
 	google.golang.org/appengine v1.6.5 // indirect
 )
