@@ -355,12 +355,8 @@ func (scope *Scope) Cache() *int64 {
 
 // Sync determines whether slave replicas may be used for SELECT queries
 func (scope *Scope) Sync() bool {
-	if scope.CacheStore() != nil && scope.CacheStore().enabled {
-		if sync, ok := scope.Value.(syncer); ok {
-			return sync.Sync()
-		}
-
-		return scope.GetModelStruct().Sync(scope.db.Model(scope.Value))
+	if sync, ok := scope.Value.(syncer); ok {
+		return sync.Sync()
 	}
 
 	return false
