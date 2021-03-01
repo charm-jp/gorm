@@ -70,7 +70,7 @@ func (s *ModelStruct) Cache(db *DB) *int64 {
 
 // TableName returns model's table name
 func (s *ModelStruct) Sync(db *DB) bool {
-	if db != nil && s.ModelType != nil {
+	if s != nil && db != nil && s.ModelType != nil {
 		// Set default table name
 		if sync, ok := reflect.New(s.ModelType).Interface().(syncer); ok {
 			return sync.Sync()

@@ -359,7 +359,7 @@ func (scope *Scope) Sync() bool {
 		return sync.Sync()
 	}
 
-	return false
+	return scope.GetModelStruct().Sync(scope.db.Model(scope.Value))
 }
 
 // TableName return table name
