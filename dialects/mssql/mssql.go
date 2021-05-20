@@ -209,7 +209,7 @@ func (mssql) LastInsertIDReturningPrefix(tableName, columnName string) string {
 		// No OUTPUT to query
 		return ""
 	}
-	return fmt.Sprintf("SELECT TOP 0 %v INTO #newIDTable FROM %v UNION ALL SELECT 0 WHERE 1 = 0;", columnName, tableName)
+	return fmt.Sprintf("SELECT TOP 0 %v INTO #newIDTable FROM %v WHERE 1=0 GROUP BY %v;", columnName, tableName, columnName)
 }
 
 func (mssql) LastInsertIDOutputInterstitial(tableName, columnName string, columns []string) string {
